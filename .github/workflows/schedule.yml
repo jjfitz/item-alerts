@@ -2,10 +2,12 @@ name: Marketplace Scraper Bot
 
 on:
   schedule:
-    # Runs every hour at minute 0 (POSIX Cron format)
+    # Runs every hour at minute 0
     - cron: '* */6 * * *'
-  # Allows you to manually trigger the script from the GitHub UI anytime
   workflow_dispatch:
+
+permissions:
+  contents: write  # Gives the bot permission to push changes to your repo
 
 jobs:
   run-scraper:
@@ -22,10 +24,6 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install feedparser requests
-      
-      - name: Install Dependencies
-        run: |
           pip install requests beautifulsoup4
 
       - name: Run Scraper Script
@@ -33,3 +31,11 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           python scraper.py
+
+      - name: Commit and Push Updated Seen Listings
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add seen_listings.json || true
+          git commit -m "chore: update seen listings database [skip ci]" || exit 0
+          git push

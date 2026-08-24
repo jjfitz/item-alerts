@@ -8,7 +8,7 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
 # Configuration
 SEARCH_QUERY = "balance bike"
-CRAIGSLIST_SITE = "nwarkansas"  # Northwest Arkansas / Fayetteville
+CRAIGSLIST_SITE = "fayar"  # Northwest Arkansas / Fayetteville
 MAX_ITEMS = 5
 
 def fetch_craigslist_items(query, site, limit=5):
@@ -62,7 +62,7 @@ if __name__ == "__main__":
         exit(1)
 
     print(f"Searching Craigslist ({CRAIGSLIST_SITE}) for: '{SEARCH_QUERY}'...")
-    results = fetch_craigslist_items(SEARCH_QUERY, CRAIGSLIST_SITE, limit=MAX_ITEMS)
+    results = fetch_craigslist_items(SEARCH_QUERY, area=CRAIGSLIST_SITE, limit=MAX_ITEMS)
     
     print(f"Found {len(results)} items.")
 

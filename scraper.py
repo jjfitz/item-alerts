@@ -6,8 +6,8 @@ import os
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-SEARCH_QUERY = "a"
-CRAIGSLIST_REGION = "fayetteville"  # <--- Updated subdomain for NWA / Fayetteville
+SEARCH_QUERY = "balance bike"
+CRAIGSLIST_REGION = "fayar"  # <--- Official Craigslist code for Northwest Arkansas / Fayetteville
 CATEGORY = "sss"
 MAX_ITEMS = 5 
 
@@ -15,15 +15,11 @@ def fetch_craigslist_items(query, region, category="sss", limit=5):
     formatted_query = query.replace(" ", "+")
     rss_url = f"https://{region}.craigslist.org/search/{category}?query={formatted_query}&format=rss"
     
-    # Pass a standard browser User-Agent so Craigslist doesn't block the GitHub runner
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
-    # Fetch RSS XML via requests first
     response = requests.get(rss_url, headers=headers)
-    
-    # Parse the raw XML feed
     feed = feedparser.parse(response.content)
     items = []
     

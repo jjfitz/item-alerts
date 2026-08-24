@@ -23,6 +23,10 @@ jobs:
       - name: Install Dependencies
         run: |
           pip install feedparser requests
+      
+      - name: Install Dependencies
+        run: |
+          pip install python-craigslist requests
 
       - name: Run Scraper Script
         env:

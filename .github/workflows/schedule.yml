@@ -1,0 +1,31 @@
+name: Marketplace Scraper Bot
+
+on:
+  schedule:
+    # Runs every hour at minute 0 (POSIX Cron format)
+    - cron: '* */6 * * *'
+  # Allows you to manually trigger the script from the GitHub UI anytime
+  workflow_dispatch:
+
+jobs:
+  run-scraper:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          pip install feedparser requests
+
+      - name: Run Scraper Script
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python scraper.py

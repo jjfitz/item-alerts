@@ -6,7 +6,7 @@ import os
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-SEARCH_QUERY = "balance bike"
+SEARCH_QUERY = "a"
 CRAIGSLIST_REGION = "fayar"  # <--- Official Craigslist code for Northwest Arkansas / Fayetteville
 CATEGORY = "sss"
 MAX_ITEMS = 5 

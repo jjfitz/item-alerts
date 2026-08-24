@@ -26,7 +26,7 @@ jobs:
       
       - name: Install Dependencies
         run: |
-          pip install python-craigslist requests
+          pip install requests
 
       - name: Run Scraper Script
         env:

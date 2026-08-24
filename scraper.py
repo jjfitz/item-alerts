@@ -8,7 +8,7 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
 # Configuration
 SEARCH_QUERY = "balance bike"
-CRAIGSLIST_SITE = "fayar"  # Northwest Arkansas / Fayetteville
+CRAIGSLIST_SITE = "nwarkansas"  # Northwest Arkansas / Fayetteville
 MAX_ITEMS = 5
 
 def fetch_craigslist_items(query, site, limit=5):

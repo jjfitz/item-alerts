@@ -15,9 +15,10 @@ SEARCH_TARGETS = [
     {"query": "laptop", "max_price": 200},
 ]
 
-# Set to True to automatically grab any $0 / free items matching your target names,
-# or set to False if you only want items within your target price ranges.
-INCLUDE_FREE_SEARCH = True
+
+# Set to True to fetch EVERYTHING posted to the general Free Stuff category
+INCLUDE_ALL_FREE_STUFF = True
+MAX_FREE_ITEMS = 10  # Max free items to check per run
 
 AREA_CODE = "fayar"  # Northwest Arkansas / Fayetteville
 MAX_ITEMS_PER_QUERY = 5
@@ -46,7 +47,7 @@ def save_seen_listings(seen_set):
 
 
 def parse_price(price_str):
-    """Parses '$45' or 'free' into an integer price value. Returns None if invalid."""
+    """Parses '$45' or 'free' into an integer price value."""
     if not price_str:
         return None
     cleaned = price_str.lower().replace("$", "").replace(",", "").strip()
@@ -58,28 +59,28 @@ def parse_price(price_str):
         return None
 
 
-def fetch_craigslist_items(query, area, max_price=None, is_free_search=False, limit=5):
-    formatted_query = query.replace(" ", "+")
-    
-    # URL params: max_price filters at the Craigslist server level
-    search_url = f"https://www.craigslist.org/search/area/{area}?query={formatted_query}"
-    if is_free_search:
-        search_url += "&max_price=0"
-    elif max_price is not None:
-        search_url += f"&max_price={max_price}"
-        
-    search_url += "#search=1~gallery~0~0"
-    
+def fetch_craigslist_items(query=None, area="fayar", max_price=None, category=None, limit=5):
+    """Fetches items either by search query or by category (e.g., category='zip' for Free)."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
     }
     
+    # Build URL based on whether we're searching keywords or grabbing category listings
+    if category:
+        search_url = f"https://www.craigslist.org/search/area/{area}?cat={category}#search=1~gallery~0~0"
+    else:
+        formatted_query = query.replace(" ", "+") if query else ""
+        search_url = f"https://www.craigslist.org/search/area/{area}?query={formatted_query}"
+        if max_price is not None:
+            search_url += f"&max_price={max_price}"
+        search_url += "#search=1~gallery~0~0"
+    
     try:
         response = requests.get(search_url, headers=headers, timeout=10)
         if response.status_code != 200:
-            print(f"Failed query '{query}' (Status: {response.status_code})")
+            print(f"Failed fetch (Status: {response.status_code})")
             return []
             
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -97,33 +98,31 @@ def fetch_craigslist_items(query, area, max_price=None, is_free_search=False, li
             price_text = price_div.text.strip() if price_div else ""
             numeric_price = parse_price(price_text)
             
-            # Double-check Python-side filtering for safety
-            if is_free_search and numeric_price is not None and numeric_price > 0:
-                continue
-            if not is_free_search and max_price is not None and numeric_price is not None and numeric_price > max_price:
+            # Python-side price filter for keyword searches
+            if category is None and max_price is not None and numeric_price is not None and numeric_price > max_price:
                 continue
 
-            display_price = f" ({price_text})" if price_text else ""
+            display_price = f" ({price_text})" if price_text else " (FREE)"
             link = a_tag.get('href', '') if a_tag else ""
             
             if link:
                 items.append({
                     "title": f"{raw_title}{display_price}",
                     "link": link,
-                    "query": query,
+                    "query": query if query else "Free Stuff Category",
                     "price_val": numeric_price,
-                    "is_free": numeric_price == 0,
+                    "is_free": category == "zip" or numeric_price == 0,
                     "published": "Recently"
                 })
                 
         return items
     except Exception as e:
-        print(f"Error fetching '{query}': {e}")
+        print(f"Error fetching data: {e}")
         return []
 
 
 def send_discord_webhook(webhook_url, item):
-    # Set embed color: Gold for free items, Blue for normal matches
+    # Gold border for free items, Blue for normal matches
     embed_color = 15844367 if item["is_free"] else 3447003
     header_tag = "🎁 FREE LISTING" if item["is_free"] else "🚨 New Listing"
     
@@ -134,7 +133,7 @@ def send_discord_webhook(webhook_url, item):
                 "url": item["link"],
                 "color": embed_color,
                 "fields": [
-                    {"name": "Search Query", "value": item["query"], "inline": True},
+                    {"name": "Source / Query", "value": item["query"], "inline": True},
                     {"name": "Published", "value": str(item["published"]), "inline": True}
                 ],
                 "footer": {"text": "GitHub Action Alert Bot"}
@@ -160,7 +159,7 @@ if __name__ == "__main__":
     
     new_alerts_count = 0
 
-    # 1. RUN REGULAR TARGETED SEARCHES WITH MAX PRICE CAPS
+    # 1. RUN TARGETED KEYWORD SEARCHES
     for target in SEARCH_TARGETS:
         query = target["query"]
         max_price = target.get("max_price")
@@ -168,7 +167,7 @@ if __name__ == "__main__":
         price_str = f"under ${max_price}" if max_price is not None else "no price limit"
         print(f"\n--- Searching for: '{query}' ({price_str}) ---")
         
-        results = fetch_craigslist_items(query, AREA_CODE, max_price=max_price, limit=MAX_ITEMS_PER_QUERY)
+        results = fetch_craigslist_items(query=query, area=AREA_CODE, max_price=max_price, limit=MAX_ITEMS_PER_QUERY)
         
         for item in results:
             link = item["link"]
@@ -186,25 +185,23 @@ if __name__ == "__main__":
             
             time.sleep(1)
 
-    # 2. OPTIONAL: RUN A DEDICATED FREE SEARCH ACROSS THE SAME QUERIES
-    if INCLUDE_FREE_SEARCH:
-        print(f"\n--- Checking for FREE ($0) listings ---")
-        for target in SEARCH_TARGETS:
-            query = target["query"]
-            free_results = fetch_craigslist_items(query, AREA_CODE, is_free_search=True, limit=MAX_ITEMS_PER_QUERY)
-            
-            for item in free_results:
-                link = item["link"]
-                if link in seen_items:
-                    continue
-                    
-                status = send_discord_webhook(DISCORD_WEBHOOK_URL, item)
-                if status in (200, 204):
-                    print(f"Sent Free Alert: {item['title']}")
-                    seen_items.add(link)
-                    new_alerts_count += 1
+    # 2. RUN GENERAL FREE STUFF CATEGORY SCAN (NO KEYWORDS)
+    if INCLUDE_ALL_FREE_STUFF:
+        print(f"\n--- Checking general FREE STUFF section (cat=zip) ---")
+        free_results = fetch_craigslist_items(area=AREA_CODE, category="zip", limit=MAX_FREE_ITEMS)
+        
+        for item in free_results:
+            link = item["link"]
+            if link in seen_items:
+                continue
                 
-                time.sleep(1)
+            status = send_discord_webhook(DISCORD_WEBHOOK_URL, item)
+            if status in (200, 204):
+                print(f"Sent Free Alert: {item['title']}")
+                seen_items.add(link)
+                new_alerts_count += 1
+            
+            time.sleep(1)
 
     # Save state back to JSON file
     save_seen_listings(seen_items)

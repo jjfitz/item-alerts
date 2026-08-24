@@ -2,63 +2,67 @@ import os
 import time
 import json
 import requests
+from bs4 import BeautifulSoup
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
 # Configuration
 SEARCH_QUERY = "balance bike"
-AREA_CODE = "fayar" # Fayetteville / NWA area code from your URL
+AREA_CODE = "fayar"  # Northwest Arkansas / Fayetteville
 MAX_ITEMS = 5
 
 def fetch_craigslist_items(query, area, limit=5):
-    # Craigslist's modern direct JSON API endpoint
-    api_url = f"https://www.craigslist.org/async/search/items"
+    formatted_query = query.replace(" ", "+")
     
-    params = {
-        "area": area,
-        "query": query,
-        "sort": "date"
-    }
+    # Direct search endpoint matching Craigslist's current URL structure
+    search_url = f"https://www.craigslist.org/search/area/{area}?query={formatted_query}#search=1~gallery~0~0"
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/javascript, */*; q=0.01",
-        "X-Requested-With": "XMLHttpRequest"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
     }
     
     try:
-        response = requests.get(api_url, params=params, headers=headers, timeout=10)
-        print(f"API Response Status Code: {response.status_code}")
+        response = requests.get(search_url, headers=headers, timeout=10)
+        print(f"Craigslist Search Status Code: {response.status_code}")
         
         if response.status_code != 200:
-            print(f"Failed request. Response text: {response.text[:200]}")
+            print(f"Failed to fetch page. Response snippet: {response.text[:200]}")
             return []
             
-        data = response.json()
-        
-        # Extract items list from the JSON payload
-        items_data = data.get("items", [])
-        print(f"Total raw items returned from API: {len(items_data)}")
-        
+        soup = BeautifulSoup(response.text, 'html.parser')
         items = []
-        for item in items_data[:limit]:
-            posting_id = item.get("postingId")
-            title = item.get("title", "No Title")
-            price = f"${item.get('price', 0)}" if "price" in item else "No Price"
+        
+        # Craigslist injects static fallback list items inside 'ol.cl-static-search-results li'
+        results = soup.select('ol.cl-static-search-results li.cl-static-search-result')
+        
+        # Fallback to standard anchor links if layout varies
+        if not results:
+            results = soup.select('li.cl-search-result')
+
+        print(f"Total HTML listing blocks found: {len(results)}")
+        
+        for li in results[:limit]:
+            a_tag = li.find('a')
+            title_div = li.find('div', class_='title')
+            price_div = li.find('div', class_='price')
             
-            # Construct direct link to the listing
-            link = f"https://{area}.craigslist.org/d/item/{posting_id}.html" if posting_id else "https://craigslist.org"
+            title = title_div.text.strip() if title_div else (a_tag.text.strip() if a_tag else "Listing")
+            price = f" ({price_div.text.strip()})" if price_div else ""
+            link = a_tag.get('href', '') if a_tag else ""
             
-            items.append({
-                "title": f"{title} - {price}",
-                "link": link,
-                "published": item.get("postedDate", "Recently")
-            })
-            
+            if link:
+                items.append({
+                    "title": f"{title}{price}",
+                    "link": link,
+                    "published": "Recently"
+                })
+                
         return items
 
     except Exception as e:
-        print(f"Error fetching from Craigslist API: {e}")
+        print(f"Error fetching Craigslist HTML: {e}")
         return []
 
 def send_discord_webhook(webhook_url, item):

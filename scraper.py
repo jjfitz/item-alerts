@@ -6,15 +6,42 @@ from bs4 import BeautifulSoup
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-# Configuration
-SEARCH_QUERY = "balance bike"
+# 1. ADD YOUR SEARCH ITEMS HERE
+SEARCH_QUERIES = [
+    "balance bike",
+    "TB",
+    "computer",
+    "laptop"
+]
+
 AREA_CODE = "fayar"  # Northwest Arkansas / Fayetteville
-MAX_ITEMS = 5
+MAX_ITEMS_PER_QUERY = 5
+SEEN_FILE = "seen_listings.json"
+
+
+def load_seen_listings():
+    """Loads previously alerted listing URLs/IDs from JSON."""
+    if os.path.exists(SEEN_FILE):
+        try:
+            with open(SEEN_FILE, "r") as f:
+                return set(json.load(f))
+        except Exception as e:
+            print(f"Error loading seen listings file: {e}")
+    return set()
+
+
+def save_seen_listings(seen_set):
+    """Saves updated seen listing IDs back to JSON."""
+    try:
+        with open(SEEN_FILE, "w") as f:
+            json.dump(list(seen_set), f, indent=2)
+        print(f"Saved {len(seen_set)} total items to {SEEN_FILE}")
+    except Exception as e:
+        print(f"Error saving seen listings file: {e}")
+
 
 def fetch_craigslist_items(query, area, limit=5):
     formatted_query = query.replace(" ", "+")
-    
-    # Direct search endpoint matching Craigslist's current URL structure
     search_url = f"https://www.craigslist.org/search/area/{area}?query={formatted_query}#search=1~gallery~0~0"
     
     headers = {
@@ -25,24 +52,16 @@ def fetch_craigslist_items(query, area, limit=5):
     
     try:
         response = requests.get(search_url, headers=headers, timeout=10)
-        print(f"Craigslist Search Status Code: {response.status_code}")
-        
         if response.status_code != 200:
-            print(f"Failed to fetch page. Response snippet: {response.text[:200]}")
+            print(f"Failed query '{query}' (Status: {response.status_code})")
             return []
             
         soup = BeautifulSoup(response.text, 'html.parser')
-        items = []
-        
-        # Craigslist injects static fallback list items inside 'ol.cl-static-search-results li'
         results = soup.select('ol.cl-static-search-results li.cl-static-search-result')
-        
-        # Fallback to standard anchor links if layout varies
         if not results:
             results = soup.select('li.cl-search-result')
 
-        print(f"Total HTML listing blocks found: {len(results)}")
-        
+        items = []
         for li in results[:limit]:
             a_tag = li.find('a')
             title_div = li.find('div', class_='title')
@@ -56,14 +75,15 @@ def fetch_craigslist_items(query, area, limit=5):
                 items.append({
                     "title": f"{title}{price}",
                     "link": link,
+                    "query": query,
                     "published": "Recently"
                 })
                 
         return items
-
     except Exception as e:
-        print(f"Error fetching Craigslist HTML: {e}")
+        print(f"Error fetching '{query}': {e}")
         return []
+
 
 def send_discord_webhook(webhook_url, item):
     payload = {
@@ -73,6 +93,7 @@ def send_discord_webhook(webhook_url, item):
                 "url": item["link"],
                 "color": 3447003,
                 "fields": [
+                    {"name": "Search Query", "value": item["query"], "inline": True},
                     {"name": "Published", "value": str(item["published"]), "inline": True}
                 ],
                 "footer": {"text": "GitHub Action Alert Bot"}
@@ -87,20 +108,40 @@ def send_discord_webhook(webhook_url, item):
     )
     return response.status_code
 
+
 if __name__ == "__main__":
     if not DISCORD_WEBHOOK_URL:
         print("Error: DISCORD_WEBHOOK_URL environment variable not found.")
         exit(1)
 
-    print(f"Searching Craigslist area '{AREA_CODE}' for: '{SEARCH_QUERY}'...")
-    results = fetch_craigslist_items(SEARCH_QUERY, AREA_CODE, limit=MAX_ITEMS)
+    seen_items = load_seen_listings()
+    print(f"Loaded {len(seen_items)} previously seen listings.")
     
-    print(f"Found {len(results)} items.")
+    new_alerts_count = 0
 
-    for item in results:
-        status = send_discord_webhook(DISCORD_WEBHOOK_URL, item)
-        if status in (200, 204):
-            print(f"Sent: {item['title']}")
-        else:
-            print(f"Failed to send ({status}): {item['title']}")
-        time.sleep(1)
+    for query in SEARCH_QUERIES:
+        print(f"\n--- Searching for: '{query}' ---")
+        results = fetch_craigslist_items(query, AREA_CODE, limit=MAX_ITEMS_PER_QUERY)
+        
+        for item in results:
+            link = item["link"]
+            
+            # Check if we've already sent this link
+            if link in seen_items:
+                print(f"Skipping (Already Seen): {item['title']}")
+                continue
+                
+            # Send alert to Discord
+            status = send_discord_webhook(DISCORD_WEBHOOK_URL, item)
+            if status in (200, 204):
+                print(f"Sent: {item['title']}")
+                seen_items.add(link)
+                new_alerts_count += 1
+            else:
+                print(f"Failed to send ({status}): {item['title']}")
+            
+            time.sleep(1)
+
+    # Save updated list back to disk
+    save_seen_listings(seen_items)
+    print(f"\nDone! Sent {new_alerts_count} new alerts.")

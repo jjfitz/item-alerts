@@ -3,6 +3,7 @@ import requests
 import json
 import time
 import os
+import urllib.parse
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
@@ -13,22 +14,19 @@ MAX_ITEMS = 5
 
 def fetch_craigslist_items(query, region, category="sss", limit=5):
     formatted_query = query.replace(" ", "+")
-    # Using the primary search URL endpoint which automatically renders RSS when format=rss is passed
-    rss_url = f"https://{region}.craigslist.org/search/{category}?format=rss&query={formatted_query}"
+    target_url = f"https://{region}.craigslist.org/search/{category}?format=rss&query={formatted_query}"
     
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "max-age=0",
-    })
+    # Route via free proxy to bypass GitHub runner IP blocks (HTTP 403)
+    proxy_url = f"https://api.allorigins.win/raw?url={urllib.parse.quote(target_url)}"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
     
     try:
-        response = session.get(rss_url, timeout=10)
-        print(f"Craigslist HTTP Status Code: {response.status_code}")
+        response = requests.get(proxy_url, headers=headers, timeout=15)
+        print(f"Proxy HTTP Status Code: {response.status_code}")
         
-        # Parse response content
         feed = feedparser.parse(response.content)
         items = []
         
@@ -42,7 +40,7 @@ def fetch_craigslist_items(query, region, category="sss", limit=5):
             
         return items
     except Exception as e:
-        print(f"Error fetching RSS: {e}")
+        print(f"Error fetching RSS via proxy: {e}")
         return []
 
 def send_discord_webhook(webhook_url, item):

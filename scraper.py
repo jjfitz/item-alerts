@@ -1,46 +1,37 @@
-import feedparser
-import requests
-import json
-import time
 import os
-import urllib.parse
+import time
+import json
+import requests
+from craigslist import CraigslistForSale
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-SEARCH_QUERY = "a"
-CRAIGSLIST_REGION = "fayar" 
-CATEGORY = "sss"
-MAX_ITEMS = 5 
+# Configuration
+SEARCH_QUERY = "balance bike"
+CRAIGSLIST_SITE = "fayar"  # Northwest Arkansas / Fayetteville
+MAX_ITEMS = 5
 
-def fetch_craigslist_items(query, region, category="sss", limit=5):
-    formatted_query = query.replace(" ", "+")
-    target_url = f"https://{region}.craigslist.org/search/{category}?format=rss&query={formatted_query}"
-    
-    # Route via free proxy to bypass GitHub runner IP blocks (HTTP 403)
-    proxy_url = f"https://api.allorigins.win/raw?url={urllib.parse.quote(target_url)}"
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    }
-    
+def fetch_craigslist_items(query, site, limit=5):
     try:
-        response = requests.get(proxy_url, headers=headers, timeout=15)
-        print(f"Proxy HTTP Status Code: {response.status_code}")
+        # Initialize Craigslist search wrapper
+        cl = CraigslistForSale(
+            site=site,
+            category='sss', # All For Sale
+            filters={'query': query}
+        )
         
-        feed = feedparser.parse(response.content)
         items = []
-        
-        for entry in feed.entries[:limit]:
-            item = {
-                "title": entry.get("title", "No Title"),
-                "link": entry.get("link", ""),
-                "published": entry.get("published", "Recently")
-            }
-            items.append(item)
+        # Query results sorted by newest
+        for result in cl.get_results(sort_by='newest', limit=limit):
+            items.append({
+                "title": f"{result.get('name', 'No Title')} - {result.get('price', 'No Price')}",
+                "link": result.get('url', ''),
+                "published": result.get('datetime', 'Recently')
+            })
             
         return items
     except Exception as e:
-        print(f"Error fetching RSS via proxy: {e}")
+        print(f"Error fetching Craigslist items: {e}")
         return []
 
 def send_discord_webhook(webhook_url, item):
@@ -51,7 +42,7 @@ def send_discord_webhook(webhook_url, item):
                 "url": item["link"],
                 "color": 3447003,
                 "fields": [
-                    {"name": "Published", "value": item["published"], "inline": True}
+                    {"name": "Published", "value": str(item["published"]), "inline": True}
                 ],
                 "footer": {"text": "GitHub Action Alert Bot"}
             }
@@ -70,8 +61,8 @@ if __name__ == "__main__":
         print("Error: DISCORD_WEBHOOK_URL environment variable not found.")
         exit(1)
 
-    print(f"Searching Craigslist ({CRAIGSLIST_REGION}) for: '{SEARCH_QUERY}'...")
-    results = fetch_craigslist_items(SEARCH_QUERY, CRAIGSLIST_REGION, CATEGORY, limit=MAX_ITEMS)
+    print(f"Searching Craigslist ({CRAIGSLIST_SITE}) for: '{SEARCH_QUERY}'...")
+    results = fetch_craigslist_items(SEARCH_QUERY, CRAIGSLIST_SITE, limit=MAX_ITEMS)
     
     print(f"Found {len(results)} items.")
 

@@ -7,31 +7,43 @@ import os
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
 SEARCH_QUERY = "a"
-CRAIGSLIST_REGION = "fayar"  # <--- Official Craigslist code for Northwest Arkansas / Fayetteville
+CRAIGSLIST_REGION = "fayar" 
 CATEGORY = "sss"
 MAX_ITEMS = 5 
 
 def fetch_craigslist_items(query, region, category="sss", limit=5):
     formatted_query = query.replace(" ", "+")
-    rss_url = f"https://{region}.craigslist.org/search/{category}?query={formatted_query}&format=rss"
+    # Using the primary search URL endpoint which automatically renders RSS when format=rss is passed
+    rss_url = f"https://{region}.craigslist.org/search/{category}?format=rss&query={formatted_query}"
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "max-age=0",
+    })
     
-    response = requests.get(rss_url, headers=headers)
-    feed = feedparser.parse(response.content)
-    items = []
-    
-    for entry in feed.entries[:limit]:
-        item = {
-            "title": entry.get("title", "No Title"),
-            "link": entry.get("link", ""),
-            "published": entry.get("published", "Recently")
-        }
-        items.append(item)
+    try:
+        response = session.get(rss_url, timeout=10)
+        print(f"Craigslist HTTP Status Code: {response.status_code}")
         
-    return items
+        # Parse response content
+        feed = feedparser.parse(response.content)
+        items = []
+        
+        for entry in feed.entries[:limit]:
+            item = {
+                "title": entry.get("title", "No Title"),
+                "link": entry.get("link", ""),
+                "published": entry.get("published", "Recently")
+            }
+            items.append(item)
+            
+        return items
+    except Exception as e:
+        print(f"Error fetching RSS: {e}")
+        return []
 
 def send_discord_webhook(webhook_url, item):
     payload = {

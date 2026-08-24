@@ -6,7 +6,7 @@ import os
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-SEARCH_QUERY = "computer"
+SEARCH_QUERY = "a"
 CRAIGSLIST_REGION = "fayetteville"  # <--- Updated subdomain for NWA / Fayetteville
 CATEGORY = "sss"
 MAX_ITEMS = 5 

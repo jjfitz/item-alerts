@@ -6,13 +6,18 @@ from bs4 import BeautifulSoup
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-# 1. ADD YOUR SEARCH ITEMS HERE
-SEARCH_QUERIES = [
-    "balance bike",
-    "TB",
-    "computer",
-    "laptop"
+# 1. CONFIGURE YOUR SEARCH TARGETS & MAX PRICES HERE
+# Set max_price to None if you don't want a price limit on that specific item.
+SEARCH_TARGETS = [
+    {"query": "balance bike", "max_price": 20},
+    {"query": "TB", "max_price": 500},
+    {"query": "computer", "max_price": 200},
+    {"query": "laptop", "max_price": 200},
 ]
+
+# Set to True to automatically grab any $0 / free items matching your target names,
+# or set to False if you only want items within your target price ranges.
+INCLUDE_FREE_SEARCH = True
 
 AREA_CODE = "fayar"  # Northwest Arkansas / Fayetteville
 MAX_ITEMS_PER_QUERY = 5
@@ -40,9 +45,30 @@ def save_seen_listings(seen_set):
         print(f"Error saving seen listings file: {e}")
 
 
-def fetch_craigslist_items(query, area, limit=5):
+def parse_price(price_str):
+    """Parses '$45' or 'free' into an integer price value. Returns None if invalid."""
+    if not price_str:
+        return None
+    cleaned = price_str.lower().replace("$", "").replace(",", "").strip()
+    if cleaned in ("free", "0"):
+        return 0
+    try:
+        return int(float(cleaned))
+    except ValueError:
+        return None
+
+
+def fetch_craigslist_items(query, area, max_price=None, is_free_search=False, limit=5):
     formatted_query = query.replace(" ", "+")
-    search_url = f"https://www.craigslist.org/search/area/{area}?query={formatted_query}#search=1~gallery~0~0"
+    
+    # URL params: max_price filters at the Craigslist server level
+    search_url = f"https://www.craigslist.org/search/area/{area}?query={formatted_query}"
+    if is_free_search:
+        search_url += "&max_price=0"
+    elif max_price is not None:
+        search_url += f"&max_price={max_price}"
+        
+    search_url += "#search=1~gallery~0~0"
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -67,15 +93,26 @@ def fetch_craigslist_items(query, area, limit=5):
             title_div = li.find('div', class_='title')
             price_div = li.find('div', class_='price')
             
-            title = title_div.text.strip() if title_div else (a_tag.text.strip() if a_tag else "Listing")
-            price = f" ({price_div.text.strip()})" if price_div else ""
+            raw_title = title_div.text.strip() if title_div else (a_tag.text.strip() if a_tag else "Listing")
+            price_text = price_div.text.strip() if price_div else ""
+            numeric_price = parse_price(price_text)
+            
+            # Double-check Python-side filtering for safety
+            if is_free_search and numeric_price is not None and numeric_price > 0:
+                continue
+            if not is_free_search and max_price is not None and numeric_price is not None and numeric_price > max_price:
+                continue
+
+            display_price = f" ({price_text})" if price_text else ""
             link = a_tag.get('href', '') if a_tag else ""
             
             if link:
                 items.append({
-                    "title": f"{title}{price}",
+                    "title": f"{raw_title}{display_price}",
                     "link": link,
                     "query": query,
+                    "price_val": numeric_price,
+                    "is_free": numeric_price == 0,
                     "published": "Recently"
                 })
                 
@@ -86,12 +123,16 @@ def fetch_craigslist_items(query, area, limit=5):
 
 
 def send_discord_webhook(webhook_url, item):
+    # Set embed color: Gold for free items, Blue for normal matches
+    embed_color = 15844367 if item["is_free"] else 3447003
+    header_tag = "🎁 FREE LISTING" if item["is_free"] else "🚨 New Listing"
+    
     payload = {
         "embeds": [
             {
-                "title": f"🚨 New Listing: {item['title']}",
+                "title": f"{header_tag}: {item['title']}",
                 "url": item["link"],
-                "color": 3447003,
+                "color": embed_color,
                 "fields": [
                     {"name": "Search Query", "value": item["query"], "inline": True},
                     {"name": "Published", "value": str(item["published"]), "inline": True}
@@ -119,19 +160,22 @@ if __name__ == "__main__":
     
     new_alerts_count = 0
 
-    for query in SEARCH_QUERIES:
-        print(f"\n--- Searching for: '{query}' ---")
-        results = fetch_craigslist_items(query, AREA_CODE, limit=MAX_ITEMS_PER_QUERY)
+    # 1. RUN REGULAR TARGETED SEARCHES WITH MAX PRICE CAPS
+    for target in SEARCH_TARGETS:
+        query = target["query"]
+        max_price = target.get("max_price")
+        
+        price_str = f"under ${max_price}" if max_price is not None else "no price limit"
+        print(f"\n--- Searching for: '{query}' ({price_str}) ---")
+        
+        results = fetch_craigslist_items(query, AREA_CODE, max_price=max_price, limit=MAX_ITEMS_PER_QUERY)
         
         for item in results:
             link = item["link"]
-            
-            # Check if we've already sent this link
             if link in seen_items:
                 print(f"Skipping (Already Seen): {item['title']}")
                 continue
                 
-            # Send alert to Discord
             status = send_discord_webhook(DISCORD_WEBHOOK_URL, item)
             if status in (200, 204):
                 print(f"Sent: {item['title']}")
@@ -142,6 +186,26 @@ if __name__ == "__main__":
             
             time.sleep(1)
 
-    # Save updated list back to disk
+    # 2. OPTIONAL: RUN A DEDICATED FREE SEARCH ACROSS THE SAME QUERIES
+    if INCLUDE_FREE_SEARCH:
+        print(f"\n--- Checking for FREE ($0) listings ---")
+        for target in SEARCH_TARGETS:
+            query = target["query"]
+            free_results = fetch_craigslist_items(query, AREA_CODE, is_free_search=True, limit=MAX_ITEMS_PER_QUERY)
+            
+            for item in free_results:
+                link = item["link"]
+                if link in seen_items:
+                    continue
+                    
+                status = send_discord_webhook(DISCORD_WEBHOOK_URL, item)
+                if status in (200, 204):
+                    print(f"Sent Free Alert: {item['title']}")
+                    seen_items.add(link)
+                    new_alerts_count += 1
+                
+                time.sleep(1)
+
+    # Save state back to JSON file
     save_seen_listings(seen_items)
     print(f"\nDone! Sent {new_alerts_count} new alerts.")
